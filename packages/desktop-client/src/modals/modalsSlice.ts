@@ -90,7 +90,7 @@ export type Modal =
       options: {
         payeeIds: string[];
         targetPayeeId: string;
-        onConfirm: () => void;
+        onConfirm: (targetPayeeId: string) => void;
       };
     }
   | {

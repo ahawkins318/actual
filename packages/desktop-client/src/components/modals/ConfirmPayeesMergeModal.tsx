@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -39,12 +39,26 @@ export function ConfirmPayeesMergeModal({
   const { t } = useTranslation();
   const { data: allPayees = [] } = usePayees();
 
-  const mergePayees = allPayees.filter(p => payeeIds.includes(p.id));
+  // All ids in the pending merge, in the order it was originally requested
+  // (target first). `currentTargetId` tracks which one the arrow has
+  // cycled to; it starts out as the original target.
+  const [currentTargetId, setCurrentTargetId] = useState(targetPayeeId);
+  const allIds = [targetPayeeId, ...payeeIds];
 
-  const targetPayee = allPayees.find(p => p.id === targetPayeeId);
+  const mergePayees = allIds
+    .filter(id => id !== currentTargetId)
+    .map(id => allPayees.find(p => p.id === id))
+    .filter(payee => payee != null);
+
+  const targetPayee = allPayees.find(p => p.id === currentTargetId);
 
   if (!targetPayee || mergePayees.length === 0) {
     return null;
+  }
+
+  function cycleTarget() {
+    const idx = allIds.indexOf(currentTargetId);
+    setCurrentTargetId(allIds[(idx + 1) % allIds.length]);
   }
 
   return (
@@ -69,7 +83,19 @@ export function ConfirmPayeesMergeModal({
                   </View>
                 ))}
               </View>
-              <SvgArrowDown width={20} height={20} />
+              <View style={{ alignItems: 'center', gap: 4 }}>
+                <Button
+                  variant="bare"
+                  onPress={cycleTarget}
+                  aria-label={t('Choose a different payee to keep')}
+                  style={{ padding: 4 }}
+                >
+                  <SvgArrowDown width={20} height={20} />
+                </Button>
+                <Text style={{ fontSize: 11, color: theme.pageTextLight }}>
+                  <Trans>Click to change which payee is kept</Trans>
+                </Text>
+              </View>
               <View style={{ width: '100%' }}>
                 <View style={targetPayeeStyle}>
                   <Text
@@ -99,7 +125,7 @@ export function ConfirmPayeesMergeModal({
                 variant="primary"
                 style={{ marginRight: 10 }}
                 onPress={async () => {
-                  onConfirm?.();
+                  onConfirm?.(currentTargetId);
                   state.close();
                 }}
               >

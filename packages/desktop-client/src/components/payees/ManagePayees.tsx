@@ -199,8 +199,11 @@ export const ManagePayees = ({
           options: {
             payeeIds: ids.filter(id => id !== targetPayeeId),
             targetPayeeId,
-            onConfirm: async () => {
-              await props.onMerge(ids);
+            onConfirm: async chosenTargetId => {
+              await props.onMerge([
+                chosenTargetId,
+                ...ids.filter(id => id !== chosenTargetId),
+              ]);
               selected.dispatch({ type: 'select-none' });
             },
           },
