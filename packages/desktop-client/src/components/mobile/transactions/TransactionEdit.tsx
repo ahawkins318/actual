@@ -678,6 +678,23 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
     const childTransactionElementRefMap = useRef<
       Record<TransactionEntity['id'], HTMLDivElement | null>
     >({});
+
+    // Track which splits have already been rendered so a newly-added split
+    // gets auto-focused exactly once. Recomputing "the first $0 split" on
+    // every render would re-focus a different, already-existing split
+    // whenever an earlier split's amount changes away from 0, yanking focus
+    // away from whatever the user is doing next.
+    const previouslySeenSplitIdsRef = useRef<Set<TransactionEntity['id']>>(
+      new Set(),
+    );
+    useEffect(() => {
+      previouslySeenSplitIdsRef.current = new Set(
+        childTransactions.map(t => t.id),
+      );
+    });
+    const newlyCreatedEmptySplitId = childTransactions.find(
+      t => t.amount === 0 && !previouslySeenSplitIdsRef.current.has(t.id),
+    )?.id;
     const hasAccountChanged = useRef(false);
 
     const payeesById = useMemo(() => groupById(payees), [payees]);
@@ -1354,12 +1371,12 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
             </View>
           )}
 
-          {childTransactions.map((childTrans, i, arr) => (
+          {childTransactions.map(childTrans => (
             <ChildTransactionEdit
               key={childTrans.id}
               transaction={childTrans}
               negate={transaction.amount <= 0}
-              amountFocused={arr.findIndex(c => c.amount === 0) === i}
+              amountFocused={childTrans.id === newlyCreatedEmptySplitId}
               ref={r => {
                 childTransactionElementRefMap.current = {
                   ...childTransactionElementRefMap.current,
