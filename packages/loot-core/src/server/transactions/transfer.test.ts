@@ -218,4 +218,68 @@ describe('Transfer', () => {
     expect(child.transfer_id).not.toBe(parent.transfer_id);
     expect(child.payee).toBe(transferOne.id);
   });
+
+  test('addTransfer links to an existing unlinked transaction on the target account instead of duplicating it', async () => {
+    await prepareDatabase();
+
+    const transferTwo = await db.first<db.DbPayee>(
+      "SELECT * FROM payees WHERE transfer_acct = 'two'",
+    );
+
+    // Simulate account "two" already having its own independently-synced
+    // transaction for this transfer (e.g. bank sync imported both sides
+    // separately, before either side's payee got rule-mapped to a transfer
+    // payee).
+    const existingId = await db.insertTransaction({
+      account: 'two',
+      amount: -5000,
+      payee: await db.insertPayee({ name: 'Some Bank Description' }),
+      date: '2017-01-02',
+    });
+
+    const transaction: Transaction = {
+      account: 'one',
+      amount: 5000,
+      payee: transferTwo.id,
+      date: '2017-01-01',
+    };
+    transaction.id = await db.insertTransaction(transaction);
+    await transfer.onInsert(transaction);
+
+    // Should have linked to the existing transaction rather than inserting
+    // a new (duplicate) leg.
+    const allTransactions = await getAllTransactions();
+    expect(allTransactions).toHaveLength(2);
+
+    const updatedOriginal = await db.getTransaction(transaction.id);
+    const updatedExisting = await db.getTransaction(existingId);
+    expect(updatedOriginal.transfer_id).toBe(existingId);
+    expect(updatedExisting.transfer_id).toBe(transaction.id);
+  });
+
+  test('addTransfer inserts a new leg when no existing candidate transaction is found', async () => {
+    await prepareDatabase();
+
+    const transferTwo = await db.first<db.DbPayee>(
+      "SELECT * FROM payees WHERE transfer_acct = 'two'",
+    );
+
+    const transaction: Transaction = {
+      account: 'one',
+      amount: 5000,
+      payee: transferTwo.id,
+      date: '2017-01-01',
+    };
+    transaction.id = await db.insertTransaction(transaction);
+    await transfer.onInsert(transaction);
+
+    const allTransactions = await getAllTransactions();
+    expect(allTransactions).toHaveLength(2);
+
+    const updatedOriginal = await db.getTransaction(transaction.id);
+    expect(updatedOriginal.transfer_id).toBeDefined();
+    const otherLeg = await db.getTransaction(updatedOriginal.transfer_id);
+    expect(otherLeg.account).toBe('two');
+    expect(otherLeg.amount).toBe(-5000);
+  });
 });

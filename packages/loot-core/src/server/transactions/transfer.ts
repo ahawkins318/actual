@@ -1,5 +1,6 @@
 // @ts-strict-ignore
 import * as db from '#server/db';
+import * as monthUtils from '#shared/months';
 
 import { runRules } from './transaction-rules';
 
@@ -57,6 +58,46 @@ export async function addTransfer(transaction, transferredAccount) {
     'SELECT id FROM payees WHERE transfer_acct = ?',
     [transaction.account],
   );
+
+  // Before inserting a brand-new leg, check whether the target account
+  // already has its own independently-synced transaction for this same
+  // real-world transfer (e.g. bank sync imported both sides of a transfer
+  // separately, and only one side's payee has been rule-mapped to the
+  // transfer payee so far). Without this check we'd insert a duplicate leg
+  // instead of linking to the transaction that's already there. Uses the
+  // same +/-7 day, exact-amount tolerance as the bank-sync fuzzy matcher in
+  // accounts/sync.ts.
+  const sevenDaysBefore = db.toDateRepr(
+    monthUtils.subDays(transaction.date, 7),
+  );
+  const sevenDaysAfter = db.toDateRepr(monthUtils.addDays(transaction.date, 7));
+  const candidate = await db.first<Pick<db.DbViewTransaction, 'id'>>(
+    `SELECT * FROM v_transactions
+     WHERE account = ? AND transfer_id IS NULL
+       AND amount = ? AND date >= ? AND date <= ?
+     ORDER BY date ASC LIMIT 1`,
+    [transferredAccount, -transaction.amount, sevenDaysBefore, sevenDaysAfter],
+  );
+
+  if (candidate) {
+    await db.updateTransaction({
+      id: candidate.id,
+      transfer_id: transaction.id,
+    });
+    await db.updateTransaction({
+      id: transaction.id,
+      transfer_id: candidate.id,
+    });
+    const categoryCleared = await clearCategory(
+      transaction,
+      transferredAccount,
+    );
+    return {
+      id: transaction.id,
+      transfer_id: candidate.id,
+      ...(categoryCleared ? { category: null } : {}),
+    };
+  }
 
   const transferTransaction = {
     account: transferredAccount,
