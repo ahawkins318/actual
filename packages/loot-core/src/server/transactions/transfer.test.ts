@@ -282,4 +282,68 @@ describe('Transfer', () => {
     expect(otherLeg.account).toBe('two');
     expect(otherLeg.amount).toBe(-5000);
   });
+  // Regression tests for a weekly $50 on-budget -> off-budget transfer
+  // (checking "one" -> brokerage "three"), where last week's checking leg was
+  // left unlinked. The lookup used to take the oldest candidate in a +/-7 day
+  // window, so each week's brokerage deposit linked to the previous week's
+  // checking withdrawal.
+  describe('weekly repeating transfer', () => {
+    async function insertCheckingLeg(date: string) {
+      return db.insertTransaction({
+        account: 'one',
+        amount: -5000,
+        payee: await db.insertPayee({ name: 'Vanguard' }),
+        date,
+      });
+    }
+
+    async function insertBrokerageDeposit(date: string) {
+      const transferOne = await db.first<db.DbPayee>(
+        "SELECT * FROM payees WHERE transfer_acct = 'one'",
+      );
+      const transaction: Transaction = {
+        account: 'three',
+        amount: 5000,
+        payee: transferOne.id,
+        date,
+      };
+      transaction.id = await db.insertTransaction(transaction);
+      await transfer.onInsert(transaction);
+      return db.getTransaction(transaction.id);
+    }
+
+    test("links to this week's leg, not last week's unlinked leftover", async () => {
+      await prepareDatabase();
+      const lastWeek = await insertCheckingLeg('2026-09-16');
+      const thisWeek = await insertCheckingLeg('2026-09-23');
+
+      const deposit = await insertBrokerageDeposit('2026-09-23');
+
+      expect(deposit.transfer_id).toBe(thisWeek);
+      expect((await db.getTransaction(lastWeek)).transfer_id).toBeNull();
+    });
+
+    test("does not link to last week's leftover before this week's leg exists", async () => {
+      await prepareDatabase();
+      const lastWeek = await insertCheckingLeg('2026-09-16');
+
+      const deposit = await insertBrokerageDeposit('2026-09-23');
+
+      expect(deposit.transfer_id).not.toBe(lastWeek);
+      expect((await db.getTransaction(lastWeek)).transfer_id).toBeNull();
+      const newLeg = await db.getTransaction(deposit.transfer_id);
+      expect(newLeg.account).toBe('one');
+      expect(newLeg.date).toBe('2026-09-23');
+    });
+
+    test('prefers the closest-dated candidate when several are in range', async () => {
+      await prepareDatabase();
+      await insertCheckingLeg('2026-09-21');
+      const closer = await insertCheckingLeg('2026-09-24');
+
+      const deposit = await insertBrokerageDeposit('2026-09-23');
+
+      expect(deposit.transfer_id).toBe(closer);
+    });
+  });
 });

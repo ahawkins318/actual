@@ -739,6 +739,132 @@ describe('Account sync', () => {
   );
 });
 
+// Regression tests for a weekly $50 transfer
+// from on-budget checking to an off-budget brokerage, with each side mapped
+// to the other's transfer payee by a rule. Last week's checking leg is still
+// unlinked, and this week's deposit used to link to it instead of to this
+// week's withdrawal -- leaving that withdrawal unlinked for next week, and
+// spawning a duplicate deposit when it was mapped by hand.
+describe('Weekly transfer between two bank-synced accounts', () => {
+  async function prepareWeeklyTransfer({ withCheckingRule = true } = {}) {
+    await db.insertAccount({ id: 'us-bank', name: 'US Bank (Joint)' });
+    await db.insertAccount({
+      id: 'vanguard',
+      name: 'Vanguard Joint',
+      offbudget: 1,
+    });
+    await db.insertPayee({
+      id: 'transfer-us-bank',
+      name: '',
+      transfer_acct: 'us-bank',
+    });
+    await db.insertPayee({
+      id: 'transfer-vanguard',
+      name: '',
+      transfer_acct: 'vanguard',
+    });
+
+    await insertRule({
+      stage: null,
+      conditionsOp: 'and',
+      conditions: [
+        { op: 'oneOf', field: 'account', value: ['vanguard'] },
+        { op: 'is', field: 'imported_payee', value: 'Cash' },
+      ],
+      actions: [{ op: 'set', field: 'payee', value: 'transfer-us-bank' }],
+    });
+    if (withCheckingRule) {
+      await insertRule({
+        stage: null,
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'account', value: 'us-bank' },
+          { op: 'is', field: 'imported_payee', value: 'Vanguard' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'transfer-vanguard' }],
+      });
+    }
+
+    // Last week's withdrawal: approved, never linked.
+    await db.insertTransaction({
+      id: 'last-week-withdrawal',
+      account: 'us-bank',
+      amount: -5000,
+      date: '2026-09-16',
+      imported_id: 'usbank-0916',
+      imported_payee: 'Vanguard',
+    });
+  }
+
+  const syncUsBank = () =>
+    reconcileTransactions(
+      'us-bank',
+      [
+        {
+          date: '2026-09-23',
+          amount: -50,
+          payeeName: 'Vanguard',
+          booked: true,
+          transactionId: 'usbank-0923',
+        },
+      ],
+      { isBankSyncAccount: true },
+    );
+  const syncVanguard = () =>
+    reconcileTransactions(
+      'vanguard',
+      [
+        {
+          date: '2026-09-23',
+          amount: 50,
+          payeeName: 'Cash',
+          booked: true,
+          transactionId: 'vanguard-0923',
+        },
+      ],
+      { isBankSyncAccount: true },
+    );
+
+  async function expectThisWeekLinkedOnce() {
+    const thisWeek = (await getAllTransactions()).filter(
+      t => t.date === 20260923,
+    );
+    expect(thisWeek).toHaveLength(2);
+    const withdrawal = thisWeek.find(t => t.account === 'us-bank');
+    const deposit = thisWeek.find(t => t.account === 'vanguard');
+    expect(withdrawal.imported_id).toBe('usbank-0923');
+    expect(deposit.imported_id).toBe('vanguard-0923');
+    expect(withdrawal.transfer_id).toBe(deposit.id);
+    expect(deposit.transfer_id).toBe(withdrawal.id);
+
+    const lastWeek = await db.getTransaction('last-week-withdrawal');
+    expect(lastWeek.transfer_id).toBeNull();
+  }
+
+  test('checking syncs before the brokerage', async () => {
+    await prepareWeeklyTransfer();
+    await syncUsBank();
+    await syncVanguard();
+    await expectThisWeekLinkedOnce();
+  });
+
+  test('the brokerage syncs before checking', async () => {
+    await prepareWeeklyTransfer();
+    await syncVanguard();
+    await syncUsBank();
+    await expectThisWeekLinkedOnce();
+  });
+
+  // With only the brokerage-side rule, this week's withdrawal should merge
+  // into the leg the deposit created, with no manual payee edit needed.
+  test('the brokerage syncs first and checking has no rule of its own', async () => {
+    await prepareWeeklyTransfer({ withCheckingRule: false });
+    await syncVanguard();
+    await syncUsBank();
+    await expectThisWeekLinkedOnce();
+  });
+});
+
 describe('SimpleFin batch sync', () => {
   function mockSimpleFinTransactions(response) {
     vi.mocked(asyncStorage.getItem).mockResolvedValue('test-token');

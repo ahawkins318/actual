@@ -64,19 +64,30 @@ export async function addTransfer(transaction, transferredAccount) {
   // real-world transfer (e.g. bank sync imported both sides of a transfer
   // separately, and only one side's payee has been rule-mapped to the
   // transfer payee so far). Without this check we'd insert a duplicate leg
-  // instead of linking to the transaction that's already there. Uses the
-  // same +/-7 day, exact-amount tolerance as the bank-sync fuzzy matcher in
-  // accounts/sync.ts.
-  const sevenDaysBefore = db.toDateRepr(
-    monthUtils.subDays(transaction.date, 7),
-  );
-  const sevenDaysAfter = db.toDateRepr(monthUtils.addDays(transaction.date, 7));
-  const candidate = await db.first<Pick<db.DbViewTransaction, 'id'>>(
-    `SELECT * FROM v_transactions
+  // instead of linking to the transaction that's already there.
+  //
+  // The window is +/-5 days (not bank sync's +/-7) and the closest date wins,
+  // so a weekly same-amount transfer can't link to last week's leg.
+  const windowStart = db.toDateRepr(monthUtils.subDays(transaction.date, 5));
+  const windowEnd = db.toDateRepr(monthUtils.addDays(transaction.date, 5));
+  const candidates = await db.all<Pick<db.DbViewTransaction, 'id' | 'date'>>(
+    `SELECT id, date FROM v_transactions
      WHERE account = ? AND transfer_id IS NULL
        AND amount = ? AND date >= ? AND date <= ?
-     ORDER BY date ASC LIMIT 1`,
-    [transferredAccount, -transaction.amount, sevenDaysBefore, sevenDaysAfter],
+     ORDER BY date ASC`,
+    [transferredAccount, -transaction.amount, windowStart, windowEnd],
+  );
+  const dayDistance = (c: { date: number }) =>
+    Math.abs(
+      monthUtils.differenceInCalendarDays(
+        db.fromDateRepr(c.date),
+        transaction.date,
+      ),
+    );
+  const candidate = candidates.reduce<(typeof candidates)[number] | null>(
+    (best, c) =>
+      best == null || dayDistance(c) < dayDistance(best) ? c : best,
+    null,
   );
 
   if (candidate) {
