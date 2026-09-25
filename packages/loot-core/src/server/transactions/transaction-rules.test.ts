@@ -221,6 +221,45 @@ describe('Transaction rules', () => {
     expect(transaction.category).toBe(null);
   });
 
+  // Regression: a rule whose only payee/imported_payee conditions are
+  // negative used to be indexed as if they were positive, so it was only
+  // ever considered for the very values it excludes and never ran.
+  test('a rule with only "is not" payee conditions runs on other payees', async () => {
+    await loadRules();
+    await insertRule({
+      stage: null,
+      conditionsOp: 'and',
+      conditions: [
+        {
+          op: 'oneOf',
+          field: 'account',
+          value: ['vanguard-joint', 'vanguard-ira'],
+        },
+        { op: 'isNot', field: 'imported_payee', value: 'Cash' },
+        { op: 'isNot', field: 'imported_payee', value: 'Market Fluctuation' },
+        { op: 'isNot', field: 'payee', value: 'investment' },
+        { op: 'isNot', field: 'payee', value: null },
+      ],
+      actions: [{ op: 'set', field: 'payee', value: 'vanguard-internal' }],
+    });
+
+    const internal = await runRules({
+      account: 'vanguard-joint',
+      imported_payee: 'VANGUARD TOTAL WORLD STOCK INDEX ADMIRAL CL',
+      payee: 'vanguard-total-world',
+      amount: -5000,
+    });
+    expect(internal.payee).toBe('vanguard-internal');
+
+    const deposit = await runRules({
+      account: 'vanguard-joint',
+      imported_payee: 'Cash',
+      payee: 'cash',
+      amount: 5000,
+    });
+    expect(deposit.payee).toBe('cash');
+  });
+
   test('payee rules match after a staged formula sets payee name', async () => {
     await loadRules();
 

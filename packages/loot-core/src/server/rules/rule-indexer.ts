@@ -36,17 +36,17 @@ export class RuleIndexer {
   }
 
   getIndexes(rule: Rule): Set<Rule>[] {
-    const cond = rule.conditions.find(cond => cond.field === this.field);
+    // Only positive conditions narrow which values a rule can match; a rule
+    // keyed by an `isNot`/`notOneOf` value would only run for the values it
+    // excludes, i.e. never.
+    const cond = rule.conditions.find(
+      cond =>
+        cond.field === this.field && (cond.op === 'is' || cond.op === 'oneOf'),
+    );
     const indexes = [];
 
-    if (
-      cond &&
-      (cond.op === 'oneOf' ||
-        cond.op === 'is' ||
-        cond.op === 'isNot' ||
-        cond.op === 'notOneOf')
-    ) {
-      if (cond.op === 'oneOf' || cond.op === 'notOneOf') {
+    if (cond) {
+      if (cond.op === 'oneOf') {
         cond.value.forEach(val => indexes.push(this.getIndexForValue(val)));
       } else {
         indexes.push(this.getIndexForValue(cond.value));

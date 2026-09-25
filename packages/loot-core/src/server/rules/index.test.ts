@@ -1223,4 +1223,42 @@ describe('RuleIndexer', () => {
       new Set([rule2]),
     );
   });
+  test('negative conditions are not indexed under the value they exclude', () => {
+    const indexer = new RuleIndexer({ field: 'payee' });
+
+    const isNotRule = new Rule({
+      conditionsOp: 'and',
+      conditions: [{ op: 'isNot', field: 'payee', value: 'investment' }],
+      actions: [{ op: 'set', field: 'notes', value: 'x' }],
+    });
+    indexer.index(isNotRule);
+
+    const notOneOfRule = new Rule({
+      conditionsOp: 'and',
+      conditions: [{ op: 'notOneOf', field: 'payee', value: ['a', 'b'] }],
+      actions: [{ op: 'set', field: 'notes', value: 'x' }],
+    });
+    indexer.index(notOneOfRule);
+
+    expect(indexer.getApplicableRules({ payee: 'vanguard' })).toEqual(
+      new Set([isNotRule, notOneOfRule]),
+    );
+  });
+
+  test('a positive condition is indexed even when a negative one comes first', () => {
+    const indexer = new RuleIndexer({ field: 'payee' });
+
+    const rule = new Rule({
+      conditionsOp: 'and',
+      conditions: [
+        { op: 'isNot', field: 'payee', value: 'b' },
+        { op: 'is', field: 'payee', value: 'a' },
+      ],
+      actions: [{ op: 'set', field: 'notes', value: 'x' }],
+    });
+    indexer.index(rule);
+
+    expect(indexer.getApplicableRules({ payee: 'a' })).toEqual(new Set([rule]));
+    expect(indexer.getApplicableRules({ payee: 'c' })).toEqual(new Set());
+  });
 });
