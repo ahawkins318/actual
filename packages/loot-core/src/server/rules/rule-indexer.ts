@@ -38,11 +38,16 @@ export class RuleIndexer {
   getIndexes(rule: Rule): Set<Rule>[] {
     // Only positive conditions narrow which values a rule can match; a rule
     // keyed by an `isNot`/`notOneOf` value would only run for the values it
-    // excludes, i.e. never.
-    const cond = rule.conditions.find(
-      cond =>
-        cond.field === this.field && (cond.op === 'is' || cond.op === 'oneOf'),
-    );
+    // excludes, i.e. never. An `or` rule can match through any condition, so
+    // no single one narrows it.
+    const cond =
+      rule.conditionsOp === 'or'
+        ? undefined
+        : rule.conditions.find(
+            cond =>
+              cond.field === this.field &&
+              (cond.op === 'is' || cond.op === 'oneOf'),
+          );
     const indexes = [];
 
     if (cond) {

@@ -1261,4 +1261,19 @@ describe('RuleIndexer', () => {
     expect(indexer.getApplicableRules({ payee: 'a' })).toEqual(new Set([rule]));
     expect(indexer.getApplicableRules({ payee: 'c' })).toEqual(new Set());
   });
+  test('an "or" rule is not narrowed by one of its conditions', () => {
+    const indexer = new RuleIndexer({ field: 'payee' });
+
+    const rule = new Rule({
+      conditionsOp: 'or',
+      conditions: [
+        { op: 'is', field: 'payee', value: 'a' },
+        { op: 'contains', field: 'notes', value: 'rent' },
+      ],
+      actions: [{ op: 'set', field: 'category', value: 'housing' }],
+    });
+    indexer.index(rule);
+
+    expect(indexer.getApplicableRules({ payee: 'b' })).toEqual(new Set([rule]));
+  });
 });

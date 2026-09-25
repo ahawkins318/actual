@@ -260,6 +260,28 @@ describe('Transaction rules', () => {
     expect(deposit.payee).toBe('cash');
   });
 
+  test('an "or" rule runs when only its non-payee condition matches', async () => {
+    await loadRules();
+    await insertRule({
+      stage: null,
+      conditionsOp: 'or',
+      conditions: [
+        { op: 'is', field: 'payee', value: 'landlord' },
+        { op: 'is', field: 'imported_payee', value: 'Rent Payment' },
+        { op: 'contains', field: 'notes', value: 'rent' },
+      ],
+      actions: [{ op: 'set', field: 'category', value: 'housing' }],
+    });
+
+    const transaction = await runRules({
+      payee: 'someone-else',
+      imported_payee: 'Zelle',
+      notes: 'september rent',
+      category: null,
+    });
+    expect(transaction.category).toBe('housing');
+  });
+
   test('payee rules match after a staged formula sets payee name', async () => {
     await loadRules();
 
