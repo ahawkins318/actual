@@ -836,6 +836,8 @@ describe('Weekly transfer between two bank-synced accounts', () => {
     expect(deposit.imported_id).toBe('vanguard-0923');
     expect(withdrawal.transfer_id).toBe(deposit.id);
     expect(deposit.transfer_id).toBe(withdrawal.id);
+    expect(withdrawal.payee).toBe('transfer-vanguard');
+    expect(deposit.payee).toBe('transfer-us-bank');
 
     const lastWeek = await db.getTransaction('last-week-withdrawal');
     expect(lastWeek.transfer_id).toBeNull();
@@ -857,6 +859,16 @@ describe('Weekly transfer between two bank-synced accounts', () => {
 
   // With only the brokerage-side rule, this week's withdrawal should merge
   // into the leg the deposit created, with no manual payee edit needed.
+  // The deposit links to the already-imported withdrawal, which must pick up
+  // the transfer payee too -- otherwise it stays "Vanguard", and a later
+  // payee edit on it would delete the deposit.
+  test('checking syncs first and has no rule of its own', async () => {
+    await prepareWeeklyTransfer({ withCheckingRule: false });
+    await syncUsBank();
+    await syncVanguard();
+    await expectThisWeekLinkedOnce();
+  });
+
   test('the brokerage syncs first and checking has no rule of its own', async () => {
     await prepareWeeklyTransfer({ withCheckingRule: false });
     await syncVanguard();

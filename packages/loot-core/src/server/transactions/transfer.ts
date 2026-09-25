@@ -91,9 +91,12 @@ export async function addTransfer(transaction, transferredAccount) {
   );
 
   if (candidate) {
+    // Also set the transfer payee, or the candidate is linked but still shows
+    // its bank payee, and a later payee edit on it deletes this transaction.
     await db.updateTransaction({
       id: candidate.id,
       transfer_id: transaction.id,
+      payee: fromPayee,
     });
     await db.updateTransaction({
       id: transaction.id,

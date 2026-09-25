@@ -255,6 +255,13 @@ describe('Transfer', () => {
     const updatedExisting = await db.getTransaction(existingId);
     expect(updatedOriginal.transfer_id).toBe(existingId);
     expect(updatedExisting.transfer_id).toBe(transaction.id);
+    expect(updatedExisting.payee).toBe(
+      (
+        await db.first<db.DbPayee>(
+          "SELECT * FROM payees WHERE transfer_acct = 'one'",
+        )
+      ).id,
+    );
   });
 
   test('addTransfer inserts a new leg when no existing candidate transaction is found', async () => {
