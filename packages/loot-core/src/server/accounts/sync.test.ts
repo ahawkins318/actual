@@ -887,7 +887,7 @@ describe('Account sync', () => {
 
   test(
     'given two same-amount incoming transactions in one sync batch, ' +
-      'the one listed first wins the match even when a later one is closer in date',
+      'the one closer in date to an existing candidate wins the match',
     async () => {
       const { id } = await prepareDatabase();
 
@@ -899,10 +899,10 @@ describe('Account sync', () => {
       });
 
       // `early` (four days off) is listed before `exact` (same day as the
-      // existing transaction) in the batch. Matches are assigned in array
-      // order, so `early` claims `existing` purely because its turn came
-      // first, leaving the closer `exact` transaction to insert as an
-      // unrelated new transaction instead.
+      // existing transaction) in the batch. Assigning matches in array
+      // order would let `early` claim `existing` first, purely because
+      // its turn came first, leaving the closer `exact` transaction to
+      // insert as an unrelated new transaction instead.
       await reconcileTransactions(
         id,
         [
@@ -926,11 +926,11 @@ describe('Account sync', () => {
       expect(transactions.length).toBe(2);
 
       const existing = transactions.find(t => t.id === 'existing');
-      expect(existing.imported_id).toBe('early');
+      expect(existing.imported_id).toBe('exact');
 
-      const exact = transactions.find(t => t.imported_id === 'exact');
-      expect(exact).toBeTruthy();
-      expect(exact.id).not.toBe('existing');
+      const early = transactions.find(t => t.imported_id === 'early');
+      expect(early).toBeTruthy();
+      expect(early.id).not.toBe('existing');
     },
   );
 
