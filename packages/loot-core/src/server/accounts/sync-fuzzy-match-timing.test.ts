@@ -215,6 +215,15 @@ describe('fuzzy matching: two bank transactions in one sync', () => {
     ]);
   });
 
+  test('equidistant on either side of one candidate: earlier bank transaction wins, reversed batch', async () => {
+    await enter(['2024-09-12']);
+    await sync([bank('2024-09-14'), bank('2024-09-10')]);
+    expect(await ledger()).toEqual([
+      'user-09-12 ← bank-09-10',
+      'new-09-14 ← bank-09-14',
+    ]);
+  });
+
   test('one candidate, closer bank transaction listed first: closer wins', async () => {
     await enter(['2024-09-12']);
     await sync([bank('2024-09-12'), bank('2024-09-08')]);
@@ -285,6 +294,94 @@ describe('fuzzy matching: two bank transactions in one sync', () => {
     expect(await ledger()).toEqual([
       'new-09-12 ← bank-09-12',
       'user-09-12 ← bank-09-16',
+    ]);
+  });
+});
+
+describe('fuzzy matching: maximizing matches within one sync', () => {
+  test('a chain of pairs shifts so every transaction matches', async () => {
+    // Pairing 12→12 and 19→19 would leave 05 (only in range of 09-12)
+    // unmatched; shifting 12→19 and 19→26 lets all three match.
+    await enter(['2024-09-12', '2024-09-19', '2024-09-26']);
+    await sync([bank('2024-09-05'), bank('2024-09-12'), bank('2024-09-19')]);
+    expect(await ledger()).toEqual([
+      'user-09-12 ← bank-09-05',
+      'user-09-19 ← bank-09-12',
+      'user-09-26 ← bank-09-19',
+    ]);
+  });
+
+  test('the shifted chain is the same with the batch reversed', async () => {
+    await enter(['2024-09-12', '2024-09-19', '2024-09-26']);
+    await sync([bank('2024-09-19'), bank('2024-09-12'), bank('2024-09-05')]);
+    expect(await ledger()).toEqual([
+      'user-09-12 ← bank-09-05',
+      'user-09-19 ← bank-09-12',
+      'user-09-26 ← bank-09-19',
+    ]);
+  });
+
+  test('a transaction stays unmatched when no pairing can include it', async () => {
+    // Same as the chain above, but without the 09-26 row only two of the
+    // three can match, and leaving out 05 keeps the other two exact.
+    await enter(['2024-09-12', '2024-09-19']);
+    await sync([bank('2024-09-05'), bank('2024-09-12'), bank('2024-09-19')]);
+    expect(await ledger()).toEqual([
+      'new-09-05 ← bank-09-05',
+      'user-09-12 ← bank-09-12',
+      'user-09-19 ← bank-09-19',
+    ]);
+  });
+
+  test('matches are maximized within the payee pass too', async () => {
+    await enter(['2024-09-12', '2024-09-13'], { payee: 'acme' });
+    await sync([
+      bank('2024-09-05', { payeeName: 'Acme' }),
+      bank('2024-09-12', { payeeName: 'Acme' }),
+    ]);
+    expect(await ledger()).toEqual([
+      'user-09-12 ← bank-09-05',
+      'user-09-13 ← bank-09-12',
+    ]);
+  });
+
+  test('a payee-pass match is not given up to add a date-only match', async () => {
+    // The review scenario, except 09-12 has a payee that the 09-12 bank
+    // transaction matches. That payee match is higher fidelity and is
+    // settled before the date-only pass, so 05 can't take its row.
+    await enter(['2024-09-12'], { payee: 'acme' });
+    await enter(['2024-09-13']);
+    await sync([bank('2024-09-05'), bank('2024-09-12', { payeeName: 'Acme' })]);
+    expect(await ledger()).toEqual([
+      'new-09-05 ← bank-09-05',
+      'user-09-12 ← bank-09-12',
+      'user-09-13 ← (none)',
+    ]);
+  });
+
+  test('a row claimed by imported_id is not given up to add a fuzzy match', async () => {
+    // The review scenario, except 12 was linked to 09-12 by an earlier sync
+    // and is re-sent here, so its row is settled before fuzzy matching.
+    await enter(['2024-09-12', '2024-09-13']);
+    await sync([bank('2024-09-12')]);
+    await sync([bank('2024-09-05'), bank('2024-09-12')]);
+    expect(await ledger()).toEqual([
+      'new-09-05 ← bank-09-05',
+      'user-09-12 ← bank-09-12',
+      'user-09-13 ← (none)',
+    ]);
+  });
+
+  test('among equally many matches, the smallest squared distance wins', async () => {
+    // 08 can only reach 09-13. Of the full pairings, 15→16 and 16→20
+    // (1² + 4²) beats 15→20 and 16→16 (5² + 0²), keeping date order.
+    await enter(['2024-09-13', '2024-09-16', '2024-09-20', '2024-09-22']);
+    await sync([bank('2024-09-08'), bank('2024-09-15'), bank('2024-09-16')]);
+    expect(await ledger()).toEqual([
+      'user-09-13 ← bank-09-08',
+      'user-09-16 ← bank-09-15',
+      'user-09-20 ← bank-09-16',
+      'user-09-22 ← (none)',
     ]);
   });
 });
