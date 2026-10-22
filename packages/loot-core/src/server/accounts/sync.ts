@@ -803,6 +803,115 @@ export async function reconcileTransactions(
   };
 }
 
+// Pairs unmatched entries in `dataList` with eligible candidates from their
+// own `fuzzyDataset`: as many pairs as possible, then the smallest total
+// squared date distance, then the fewest candidates that already carry an
+// imported_id. Entries are grouped by `groupKey` (all of a group's
+// candidates share it) and each group is solved by `alignGroup`.
+// `hasMatched` is shared across both fuzzy-matching passes (and the
+// id/imported_id pass before them), so a candidate claimed here can't be
+// claimed again later.
+function alignCandidates(dataList, hasMatched, isEligible, groupKey) {
+  const results = dataList.map(d => ({ ...d }));
+
+  const groups = new Map();
+  results.forEach((data, batchIndex) => {
+    if (data.match || !data.fuzzyDataset) return;
+    const candidates = data.fuzzyDataset.filter(
+      row => !hasMatched.has(row.id) && isEligible(data, row),
+    );
+    if (candidates.length === 0) return;
+    const key = groupKey(data);
+    if (!groups.has(key)) groups.set(key, { entries: [], rows: new Map() });
+    const group = groups.get(key);
+    group.entries.push({
+      data,
+      batchIndex,
+      candidateIds: new Set(candidates.map(row => row.id)),
+    });
+    for (const row of candidates) group.rows.set(row.id, row);
+  });
+
+  for (const { entries, rows } of groups.values()) {
+    entries.sort(
+      (a, b) =>
+        a.data.trans.date.localeCompare(b.data.trans.date) ||
+        a.batchIndex - b.batchIndex,
+    );
+    const sortedRows = [...rows.values()].sort(
+      (a, b) =>
+        a.date - b.date ||
+        Number(a.imported_id != null) - Number(b.imported_id != null),
+    );
+    for (const [entry, row] of alignGroup(entries, sortedRows)) {
+      hasMatched.add(row.id);
+      entry.data.match = row;
+    }
+  }
+
+  return results;
+}
+
+// Within a group every candidate is the same amount (and payee, in the
+// payee pass), so eligibility is just the date window. Then some optimal
+// pairing never crosses in time: if two pairs cross, swapping their
+// candidates keeps both within the window and lowers the squared distance.
+// That makes this an alignment of two date-sorted lists, like `diff`:
+// best[i][j] is the best result for entries[i..] and rows[j..].
+function alignGroup(entries, rows) {
+  const isBetter = (a, b) =>
+    a.pairs - b.pairs || b.squaredDays - a.squaredDays || b.linked - a.linked;
+
+  const best = Array.from({ length: entries.length + 1 }, () =>
+    Array.from({ length: rows.length + 1 }, () => ({
+      pairs: 0,
+      squaredDays: 0,
+      linked: 0,
+      step: null,
+    })),
+  );
+
+  const entryDates = entries.map(({ data }) =>
+    dateFns.parseISO(data.trans.date),
+  );
+  const rowDates = rows.map(row => dateFns.parseISO(db.fromDateRepr(row.date)));
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    for (let j = rows.length - 1; j >= 0; j--) {
+      const row = rows[j];
+      const options = [];
+
+      const days = dateFns.differenceInCalendarDays(entryDates[i], rowDates[j]);
+      if (entries[i].candidateIds.has(row.id) && Number.isFinite(days)) {
+        const rest = best[i + 1][j + 1];
+        options.push({
+          pairs: rest.pairs + 1,
+          squaredDays: rest.squaredDays + days * days,
+          linked: rest.linked + Number(row.imported_id != null),
+          step: 'pair',
+        });
+      }
+      options.push({ ...best[i + 1][j], step: 'skipData' });
+      options.push({ ...best[i][j + 1], step: 'skipRow' });
+
+      // On a full tie the earlier option wins: pairing first, so the
+      // earlier-dated (then earlier-in-batch) entry gets the candidate.
+      best[i][j] = options.reduce((a, b) => (isBetter(b, a) > 0 ? b : a));
+    }
+  }
+
+  const pairs = [];
+  let i = 0;
+  let j = 0;
+  while (i < entries.length && j < rows.length) {
+    const { step } = best[i][j];
+    if (step === 'pair') pairs.push([entries[i], rows[j]]);
+    if (step !== 'skipRow') i++;
+    if (step !== 'skipData') j++;
+  }
+  return pairs;
+}
+
 // Ranks fuzzy-match candidates by distance from transaction date, nearest first.
 // On a same-distance tie, a candidate that already carries its own imported_id
 // (from a previous, unrelated sync) ranks after one that doesn't. Without this
@@ -986,43 +1095,29 @@ export async function matchTransactions(
   // Next, do the fuzzy matching. This first pass matches based on the
   // payee id. We do this in multiple passes so that higher fidelity
   // matching always happens first, i.e. a transaction should match
-  // match with low fidelity if a later transaction is going to match
+  // with low fidelity if a later transaction is going to match
   // the same one with high fidelity.
-  const transactionsStep2 = transactionsStep1.map(data => {
-    if (!data.match && data.fuzzyDataset) {
-      // Try to find one where the payees match.
-      const match = data.fuzzyDataset.find(
-        row =>
-          !hasMatched.has(row.id) &&
-          !exactMatchedParentIds.has(row.parent_id) &&
-          data.trans.payee === row.payee,
-      );
-
-      if (match) {
-        hasMatched.add(match.id);
-        return { ...data, match };
-      }
-    }
-    return data;
-  });
+  //
+  // Within each pass, pairs are chosen across the whole batch (see
+  // `alignCandidates`), not in whatever order the bank returned them.
+  const transactionsStep2 = alignCandidates(
+    transactionsStep1,
+    hasMatched,
+    (data, row) =>
+      !exactMatchedParentIds.has(row.parent_id) &&
+      data.trans.payee === row.payee,
+    data => `${data.trans.amount}|${data.trans.payee}`,
+  );
 
   // The final fuzzy matching pass. This is the lowest fidelity
-  // matching: it just find the first transaction that hasn't been
-  // matched yet. Remember the dataset only contains transactions
-  // around the same date with the same amount.
-  const transactionsStep3 = transactionsStep2.map(data => {
-    if (!data.match && data.fuzzyDataset) {
-      const match = data.fuzzyDataset.find(
-        row =>
-          !hasMatched.has(row.id) && !exactMatchedParentIds.has(row.parent_id),
-      );
-      if (match) {
-        hasMatched.add(match.id);
-        return { ...data, match };
-      }
-    }
-    return data;
-  });
+  // matching: date alone. Remember the dataset only contains
+  // transactions around the same date with the same amount.
+  const transactionsStep3 = alignCandidates(
+    transactionsStep2,
+    hasMatched,
+    (_data, row) => !exactMatchedParentIds.has(row.parent_id),
+    data => data.trans.amount,
+  );
 
   return {
     payeesToCreate,
