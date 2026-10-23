@@ -258,6 +258,14 @@ function SingleAutocomplete<T extends AutocompleteItem>({
   );
   const [isChanged, setIsChanged] = useState(false);
   const [originalItem, setOriginalItem] = useState(selectedItem);
+  // A table cell can commit a selection while its editor stays open, so the
+  // committed value, not the one the editor opened with, is what Escape
+  // should revert to.
+  const [prevInitialValue, setPrevInitialValue] = useState(initialValue);
+  if (prevInitialValue !== initialValue) {
+    setPrevInitialValue(initialValue);
+    setOriginalItem(findItem(strict, suggestions, initialValue));
+  }
   const filteredSuggestions = useMemo(
     () => filterSuggestions(suggestions, value),
     [filterSuggestions, suggestions, value],
