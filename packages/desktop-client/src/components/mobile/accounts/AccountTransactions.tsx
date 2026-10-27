@@ -37,7 +37,10 @@ import {
   calculateRunningBalancesTopDown,
   useTransactions,
 } from '#hooks/useTransactions';
-import { useTransactionsSearch } from '#hooks/useTransactionsSearch';
+import {
+  ungroupSearchResults,
+  useTransactionsSearch,
+} from '#hooks/useTransactionsSearch';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
 import * as queries from '#queries';
 import { useDispatch } from '#redux';
@@ -303,7 +306,7 @@ function TransactionListWithPreviews({
   const transactionsToDisplay = !isSearching
     ? // Do not render child transactions in the list, unless searching
       previewTransactionsToDisplay.concat(transactions.filter(t => !t.is_child))
-    : transactions;
+    : ungroupSearchResults(transactions);
 
   return (
     <>

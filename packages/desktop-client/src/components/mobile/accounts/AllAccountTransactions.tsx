@@ -18,7 +18,10 @@ import { usePreviewTransactions } from '#hooks/usePreviewTransactions';
 import { getSchedulesQuery } from '#hooks/useSchedules';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { useTransactions } from '#hooks/useTransactions';
-import { useTransactionsSearch } from '#hooks/useTransactionsSearch';
+import {
+  ungroupSearchResults,
+  useTransactionsSearch,
+} from '#hooks/useTransactionsSearch';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
 import * as queries from '#queries';
 import { useDispatch } from '#redux';
@@ -192,7 +195,7 @@ function TransactionListWithPreviews() {
     !isSearching && !isFiltered
       ? // Do not render child transactions in the list, unless searching or filtering
         previewTransactions.concat(transactions.filter(t => !t.is_child))
-      : transactions;
+      : ungroupSearchResults(transactions);
 
   return (
     <TransactionListWithBalances

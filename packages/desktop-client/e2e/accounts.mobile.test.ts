@@ -2,7 +2,9 @@ import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import { ConfigurationPage } from './page-models/configuration-page';
+import { MobileAccountPage } from './page-models/mobile-account-page';
 import { MobileNavigation } from './page-models/mobile-navigation';
+import { Navigation } from './page-models/navigation';
 
 test.describe('Mobile Accounts', () => {
   let page: Page;
@@ -61,6 +63,27 @@ test.describe('Mobile Accounts', () => {
     await accountPage.searchByText('Kroger');
     await expect(accountPage.transactions).not.toHaveCount(0);
     await expect(page).toMatchThemeScreenshots();
+  });
+
+  test('searching a payee lists a split with its matching lines', async () => {
+    // Splitting on desktop clears the parent's payee, leaving it on the lines.
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const desktopAccountPage = await new Navigation(page).goToAccountPage(
+      'Ally Savings',
+    );
+    await desktopAccountPage.createSplitTransaction([
+      { payee: 'Krogger', debit: '333.33' },
+      { category: 'General', debit: '222.22' },
+      { category: 'Food', debit: '111.11' },
+    ]);
+
+    await page.setViewportSize({ width: 350, height: 600 });
+    const accountPage = new MobileAccountPage(page);
+    await accountPage.waitFor();
+
+    await accountPage.searchByText('Krogger');
+    await expect(accountPage.transactions).toHaveCount(3);
+    await expect(accountPage.transactions.first()).toContainText('333.33');
   });
 
   test('reconciles an account', async () => {
