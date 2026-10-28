@@ -39,4 +39,17 @@ describe('transactionsSearch', () => {
       '"$eq":500',
     );
   });
+
+  it.each([
+    ['1', true],
+    ['1.', true],
+    ['$1', true],
+    ['1.00', false],
+    ['1.99', false],
+  ])('searching %s matches whole-unit amounts: %s', (search, expected) => {
+    const query = transactionsSearch(q('transactions'), search, 'MM/dd/yyyy');
+    expect(
+      JSON.stringify(query.state.filterExpressions).includes('$idiv'),
+    ).toBe(expected);
+  });
 });

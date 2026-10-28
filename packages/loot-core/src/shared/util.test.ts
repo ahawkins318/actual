@@ -1,4 +1,5 @@
 import {
+  currencyHasFraction,
   currencyToAmount,
   getNumberFormat,
   integerToCurrencyWithDecimal,
@@ -196,6 +197,19 @@ describe('utility functions', () => {
     expect(currencyToAmount('3,')).toBe(3);
     expect(currencyToAmount('3,000')).toBe(3000);
     expect(currencyToAmount('3,000.')).toBe(3000);
+  });
+
+  test('currencyHasFraction detects a typed fraction, even of zeros', () => {
+    setNumberFormat({ format: 'comma-dot', hideFraction: false });
+    expect(currencyHasFraction('1.00')).toBe(true);
+    expect(currencyHasFraction('1.5')).toBe(true);
+    expect(currencyHasFraction('1')).toBe(false);
+    expect(currencyHasFraction('1.')).toBe(false);
+    expect(currencyHasFraction('1,000')).toBe(false);
+
+    setNumberFormat({ format: 'dot-comma', hideFraction: false });
+    expect(currencyHasFraction('1,00')).toBe(true);
+    expect(currencyHasFraction('1.000')).toBe(false);
   });
 
   test('currencyToAmount works with hidden fractions', () => {

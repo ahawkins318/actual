@@ -490,9 +490,20 @@ export function amountToCurrencyNoDecimal(amount: Amount): CurrencyAmount {
 }
 
 export function currencyToAmount(currencyAmount: string): Amount | null {
+  const { integer, fraction } = splitCurrencyAmount(currencyAmount);
+  const amount = parseFloat(integer + '.' + fraction);
+  return isNaN(amount) ? null : amount;
+}
+
+// True when the input has digits after its decimal separator, even zeros ("1.00").
+export function currencyHasFraction(currencyAmount: string): boolean {
+  return /\d/.test(splitCurrencyAmount(currencyAmount).fraction ?? '');
+}
+
+function splitCurrencyAmount(currencyAmount: string) {
   currencyAmount = currencyAmount.replace(/\u2212/g, '-');
 
-  let integer, fraction;
+  let integer: string, fraction: string | null;
 
   // match the last dot or comma in the string
   const match = currencyAmount.match(/[,.](?=[^.,]*$)/);
@@ -509,8 +520,7 @@ export function currencyToAmount(currencyAmount: string): Amount | null {
     fraction = currencyAmount.slice(match.index + 1);
   }
 
-  const amount = parseFloat(integer + '.' + fraction);
-  return isNaN(amount) ? null : amount;
+  return { integer, fraction };
 }
 
 export function currencyToInteger(

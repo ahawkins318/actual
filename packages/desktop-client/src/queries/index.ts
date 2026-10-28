@@ -10,6 +10,7 @@ import { q } from '@actual-app/core/shared/query';
 import type { Query } from '@actual-app/core/shared/query';
 import {
   amountToInteger,
+  currencyHasFraction,
   currencyToAmount,
 } from '@actual-app/core/shared/util';
 import type { AccountEntity } from '@actual-app/core/types/models';
@@ -100,8 +101,13 @@ const searchAmountRegex = new RegExp(
 
 // currencyToAmount strips every non-digit, so "1password" would parse as 1.
 function parseSearchAmount(search: string) {
-  const match = search.match(searchAmountRegex);
-  return match ? currencyToAmount(match[1]) : null;
+  const text = search.match(searchAmountRegex)?.[1];
+  return text == null
+    ? { amount: null, hasFraction: false }
+    : {
+        amount: currencyToAmount(text),
+        hasFraction: currencyHasFraction(text),
+      };
 }
 
 export function transactionsSearch(
@@ -109,7 +115,7 @@ export function transactionsSearch(
   search: string,
   dateFormat: SyncedPrefs['dateFormat'],
 ) {
-  const amount = parseSearchAmount(search);
+  const { amount, hasFraction } = parseSearchAmount(search);
   const escapedSearch = search.replace(/[\\%?]/g, '\\$&');
 
   // Support various date formats
@@ -135,7 +141,8 @@ export function transactionsSearch(
           amount: { $transform: '$abs', $eq: amountToInteger(amount) },
         },
         amount != null &&
-          Number.isInteger(amount) && {
+          Number.isInteger(amount) &&
+          !hasFraction && {
             amount: {
               $transform: { $abs: { $idiv: ['$', 100] } },
               $eq: amount,
