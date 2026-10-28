@@ -91,16 +91,17 @@ const currencySymbolPattern = [
 
 // A number with an optional sign and currency symbol on either side. The sign
 // is dropped because amount matching compares absolute values.
-const searchAmountRegex = new RegExp(
+const currencyAmountRegex = new RegExp(
   `^\\s*[-\u2212]?\\s*(?:${currencySymbolPattern})?\\s*[-\u2212]?\\s*` +
     `([\\d.,'\u2019\\s]*\\d[\\d.,'\u2019\\s]*?)` +
     `\\s*(?:${currencySymbolPattern})?\\s*$`,
   'iu',
 );
 
-// currencyToAmount strips every non-digit, so "1password" would parse as 1.
+// extract the currency amount from the search string before calling currencyToAmount,
+// otherwise a search string like "7-eleven" would be treated as an amount of 7
 function parseSearchAmount(search: string) {
-  const match = search.match(searchAmountRegex);
+  const match = search.match(currencyAmountRegex);
   return match ? currencyToAmount(match[1]) : null;
 }
 
