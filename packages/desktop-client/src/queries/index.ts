@@ -1,3 +1,4 @@
+import { currencies } from '@actual-app/core/shared/currencies';
 import {
   dayFromDate,
   getDayMonthFormat,
@@ -80,12 +81,35 @@ export function transactions(
   return query;
 }
 
+const currencySymbolPattern = [
+  ...new Set(currencies.map(currency => currency.symbol).filter(Boolean)),
+]
+  .sort((a, b) => b.length - a.length)
+  .map(symbol => symbol.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&'))
+  .concat('\\p{Sc}')
+  .join('|');
+
+// A number with an optional sign and currency symbol on either side. The sign
+// is dropped because amount matching compares absolute values.
+const searchAmountRegex = new RegExp(
+  `^\\s*[-\u2212]?\\s*(?:${currencySymbolPattern})?\\s*[-\u2212]?\\s*` +
+    `([\\d.,'\u2019\\s]*\\d[\\d.,'\u2019\\s]*?)` +
+    `\\s*(?:${currencySymbolPattern})?\\s*$`,
+  'iu',
+);
+
+// currencyToAmount strips every non-digit, so "1password" would parse as 1.
+function parseSearchAmount(search: string) {
+  const match = search.match(searchAmountRegex);
+  return match ? currencyToAmount(match[1]) : null;
+}
+
 export function transactionsSearch(
   currentQuery: Query,
   search: string,
   dateFormat: SyncedPrefs['dateFormat'],
 ) {
-  const amount = currencyToAmount(search);
+  const amount = parseSearchAmount(search);
   const escapedSearch = search.replace(/[\\%?]/g, '\\$&');
 
   // Support various date formats
